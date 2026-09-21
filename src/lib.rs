@@ -58,6 +58,18 @@
 //! The extent of Cargo's SemVer support is documented in the *[Specifying
 //! Dependencies]* chapter of the Cargo reference.
 //!
+//! # Normalization boundaries
+//!
+//! String round-trip, structural equality (`Eq`/`Hash`/`Ord`), and requirement
+//! matching are distinct relationships. Build metadata participates in
+//! structural equality and `Display` but not in precedence or `matches`, and
+//! two requirements agreeing on some probe versions is only a finite witness of
+//! equivalence. The field-by-field contract for all five types, together with
+//! the table-driven tests that pin it down (leading zeros, empty
+//! pre-release/build, illegal ASCII, overflow, wildcards, missing components,
+//! multiple comparators, whitespace, and serde formats), is documented in the
+//! repository's `NORMALIZATION.md`.
+//!
 //! [Specifying Dependencies]: https://doc.rust-lang.org/cargo/reference/specifying-dependencies.html
 
 #![doc(html_root_url = "https://docs.rs/semver/1.0.28")]
@@ -154,6 +166,27 @@ pub use crate::parse::Error;
 ///     identifier:&ensp;`1.0.0-pre.1` is less than `1.0.0-pre.x`.
 ///
 /// Example:&ensp;`1.0.0-alpha`&ensp;&lt;&ensp;`1.0.0-alpha.1`&ensp;&lt;&ensp;`1.0.0-alpha.beta`&ensp;&lt;&ensp;`1.0.0-beta`&ensp;&lt;&ensp;`1.0.0-beta.2`&ensp;&lt;&ensp;`1.0.0-beta.11`&ensp;&lt;&ensp;`1.0.0-rc.1`&ensp;&lt;&ensp;`1.0.0`
+///
+/// # Build metadata and the three notions of equality
+///
+/// Be careful not to conflate three distinct relationships between versions:
+///
+/// - **String round-trip** is `Version::parse(text)?.to_string() == text`.
+///   Every successfully parsed `Version` displays to an equivalent canonical
+///   spelling, but not every legal input is canonical. Parsing never rejects a
+///   non-canonical spelling it otherwise accepts; instead, downstream code
+///   compares fields rather than the original string.
+///
+/// - **Structural equality** ([`Eq`], [`Hash`], and the derived total [`Ord`])
+///   includes build metadata. `1.0.0+a` and `1.0.0+b` are different `Version`
+///   values, hash differently, and are ordered by their build metadata.
+///
+/// - **Precedence** ([`Version::cmp_precedence`] and every `matches`
+///   evaluation) disregards build metadata entirely. `1.0.0+a` and `1.0.0+b`
+///   have equal precedence, and build metadata on either side never affects
+///   whether a [`VersionReq`] matches. Build metadata written on a comparator
+///   (such as `=1.0.0+a`) is discarded during parsing and is not part of the
+///   [`Comparator`] structure at all.
 #[derive(Clone, Eq, PartialEq, Ord, PartialOrd, Hash)]
 pub struct Version {
     pub major: u64,
@@ -180,6 +213,30 @@ pub struct Version {
 /// - Whitespace is permitted around commas and around operators. Whitespace is
 ///   not permitted within a partial version, i.e. anywhere between the major
 ///   version number and its minor, patch, pre-release, or build metadata.
+///
+/// # Parsing versus display
+///
+/// Parsing is permissive about spelling but [`VersionReq`] stores only the
+/// parsed [`Comparator`] sequence, and `Display` emits a single canonical
+/// spelling. In particular:
+///
+/// - a comparator with no explicit operator is stored as [`Op::Caret`], so
+///   `1.0.0` displays as `^1.0.0`;
+/// - wildcard spellings `*`, `x`, and `X` are canonicalized to `*`;
+/// - arbitrary ASCII spaces (`' '`) around operators and commas are tolerated
+///   and stripped, and commas are always re-emitted as `", "`. No other
+///   whitespace, such as a tab (`'\t'`), is treated as insignificant;
+/// - build metadata on a comparator is parsed for validity but then dropped,
+///   so `=1.0.0+b` displays as `=1.0.0`.
+///
+/// Consequently, do not use string equality to compare requirements. Structural
+/// equality compares the ordered comparator sequence (`(op, major, minor,
+/// patch, pre)` of each): commuting conjunctions as in `>=1.0.0, <2.0.0` and
+/// `<2.0.0, >=1.0.0` produces different values despite describing the same set
+/// of versions. Two requirements returning the same answers for a handful of
+/// probe versions is only a finite witness of equivalence, not a proof; for
+/// example `*` and `>=0.0.0-0` agree on every stable release but disagree on
+/// `0.0.0-alpha`, because a bare `*` matches no pre-releases.
 #[derive(Clone, Eq, PartialEq, Hash, Debug)]
 pub struct VersionReq {
     pub comparators: Vec<Comparator>,
@@ -187,6 +244,26 @@ pub struct VersionReq {
 
 /// A pair of comparison operator and partial version, such as `>=1.2`. Forms
 /// one piece of a VersionReq.
+///
+/// # Fields and display
+///
+/// The structural identity is exactly the five fields `(op, major, minor,
+/// patch, pre)`; there is no build-metadata field. The text in `Display`
+/// reflects those fields, which makes a couple of parses display differently
+/// from how they were written:
+///
+/// - `1.*` sets `op` to [`Op::Wildcard`] and displays as `1.*`. But with an
+///   explicit operator, the wildcard only fills in missing components and is
+///   not re-emitted: `=1.*` stores `(Op::Exact, major=1, minor=None)` and
+///   displays as `=1`.
+/// - Build metadata such as the `+b` in `=1.2.3+b` is discarded entirely.
+///
+/// Missing `minor`/`patch` are significant and are not expanded ahead of time.
+/// The interval equivalences documented on [`Op`] (e.g. `<I.J` &harr; `<I.J.0`
+/// for stable versions) hold for ordinary releases, but pre-release versions
+/// additionally pass through the `same major.minor.patch with its own
+/// pre-release` gate described on [`VersionReq::STAR`]. For example `<1.2`
+/// rejects `1.2.0-alpha`, while the fully specified `<1.2.0` accepts it.
 #[derive(Clone, Eq, PartialEq, Hash, Debug)]
 pub struct Comparator {
     pub op: Op,
@@ -305,6 +382,18 @@ pub enum Op {
 /// non-numeric identifier.
 ///
 /// Example:&ensp;`alpha`&ensp;&lt;&ensp;`alpha.85`&ensp;&lt;&ensp;`alpha.90`&ensp;&lt;&ensp;`alpha.200`&ensp;&lt;&ensp;`alpha.0a`&ensp;&lt;&ensp;`alpha.1a0`&ensp;&lt;&ensp;`alpha.a`&ensp;&lt;&ensp;`beta`
+///
+/// # Construction and overflow
+///
+/// The empty pre-release is represented by [`Prerelease::EMPTY`] and is also
+/// what `Prerelease::new("")` returns, but an empty string is not reachable
+/// through `Version` syntax: `1.0.0-` is a parse error. A bare hyphen is
+/// itself a legal identifier, so `Prerelease::new("-")` succeeds.
+///
+/// Numeric components are compared by digit count and then ASCII text, not by
+/// parsing into an integer. A component longer than `u64::MAX` such as
+/// `99999999999999999999999` parses and orders correctly; overflow errors only
+/// apply to the major, minor, and patch numbers.
 #[derive(Default, Clone, Eq, PartialEq, Hash)]
 pub struct Prerelease {
     identifier: Identifier,
@@ -363,6 +452,13 @@ pub struct Prerelease {
 /// identifier is always less than any non-numeric identifier.
 ///
 /// Example:&ensp;`demo`&ensp;&lt;&ensp;`demo.85`&ensp;&lt;&ensp;`demo.90`&ensp;&lt;&ensp;`demo.090`&ensp;&lt;&ensp;`demo.200`&ensp;&lt;&ensp;`demo.1a0`&ensp;&lt;&ensp;`demo.a`&ensp;&lt;&ensp;`memo`
+///
+/// Because leading zeros are legal here, two numeric identifiers can denote
+/// the same number with different spellings. Those order first by numeric
+/// value, and then—unlike pre-release identifiers—by the original spelling
+/// length, so `0 < 00 < 1 < 01 < 001 < 2 < 02 < 002 < 10`. This total order
+/// only governs comparisons between build metadatas (and the derived order of
+/// [`Version`]); it never affects precedence or requirement matching.
 #[derive(Default, Clone, Eq, PartialEq, Hash)]
 pub struct BuildMetadata {
     identifier: Identifier,
@@ -504,6 +600,9 @@ impl VersionReq {
     /// - `>=1.0 <2.0` &mdash; missing comma between comparators.
     ///
     /// - `*.*` &mdash; unsupported wildcard syntax.
+    ///
+    /// A requirement may contain at most 32 comma-separated comparators; a
+    /// 33rd produces an "excessive number of version comparators" error.
     pub fn parse(text: &str) -> Result<Self, Error> {
         VersionReq::from_str(text)
     }

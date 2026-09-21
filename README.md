@@ -66,6 +66,17 @@ Dependencies]* chapter of the Cargo reference.
 
 <br>
 
+#### Normalization boundaries
+
+String round-tripping, structural equality, and requirement matching are three
+different things. For the field-by-field contract of `Version`, `VersionReq`,
+`Comparator`, `Prerelease`, and `BuildMetadata`—with table-driven regression
+tests covering leading zeros, empty pre-release/build, illegal ASCII, oversized
+integers, wildcards, missing components, multiple comparators, whitespace, and
+serde human-readable versus binary formats—see [NORMALIZATION.md](NORMALIZATION.md).
+
+<br>
+
 #### License
 
 <sup>

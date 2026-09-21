@@ -25,6 +25,9 @@ serde = { version = "1.0.220", optional = true, default-features = false }
 
 [target.'cfg(not(miri))'.dev-dependencies]
 criterion = { version = "0.8", default-features = false }
+# 用于 tests/test_serde_normalization.rs（#![cfg(feature = "serde")]）的
+# 人类可读格式断言；版本已存在于 Cargo.lock（criterion 间接依赖）。
+serde_json = "1.0"
 
 [[bench]]
 name = "parse"

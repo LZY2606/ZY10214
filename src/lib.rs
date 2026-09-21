@@ -180,6 +180,30 @@ pub struct Version {
 /// - Whitespace is permitted around commas and around operators. Whitespace is
 ///   not permitted within a partial version, i.e. anywhere between the major
 ///   version number and its minor, patch, pre-release, or build metadata.
+///
+/// # Display normalization
+///
+/// Parsing accepts several spellings that are stored identically and written
+/// back in a single canonical form by the `Display` impl. Re-parsing the
+/// displayed string always produces a structurally equal `VersionReq`:
+///
+/// - a missing operator is canonicalized to caret (`1.0.0` displays as
+///   `^1.0.0`),
+/// - wildcards `x`, `X`, and `*` are unified (`1.x`, `1.X`, and `1.*.*` all
+///   display as `1.*`); the bare wildcard displays as `*` and is stored as an
+///   empty comparator list ([`VersionReq::STAR`]),
+/// - build metadata on a comparator is discarded (`>=1.2.3+meta` displays as
+///   `>=1.2.3`),
+/// - only ASCII spaces are trimmed (at the start, after an operator, around a
+///   comma, and at the end); tabs and newlines are rejected,
+/// - a wildcard on a comparator with an explicit operator loses its `.*` in
+///   the display, so `=1.*` and `=1` both display as `=1` and are structurally
+///   equal.
+///
+/// Equality and hashing follow the stored comparators, not the original
+/// spelling, and `VersionReq` does not implement `Ord`. Equal match results
+/// against a finite set of probe versions are only a finite witness, not proof
+/// of global equivalence.
 #[derive(Clone, Eq, PartialEq, Hash, Debug)]
 pub struct VersionReq {
     pub comparators: Vec<Comparator>,
@@ -187,6 +211,13 @@ pub struct VersionReq {
 
 /// A pair of comparison operator and partial version, such as `>=1.2`. Forms
 /// one piece of a VersionReq.
+///
+/// Build metadata is parsed for compatibility but not stored: there is no
+/// build field here, so `=1.0.0+a` and `=1.0.0+b` compare equal. Missing
+/// minor/patch components are stored as `None` and left absent by `Display`;
+/// only [`Op::Wildcard`] appends `.*`. Consequently an explicit operator plus
+/// a wildcard collapses in the display: `=1.*` and `=1` display identically as
+/// `=1`.
 #[derive(Clone, Eq, PartialEq, Hash, Debug)]
 pub struct Comparator {
     pub op: Op,
@@ -351,6 +382,10 @@ pub struct Prerelease {
 /// not be empty. Leading zeros *are* allowed, unlike any other place in the
 /// SemVer grammar.
 ///
+/// In ordering, an all-numeric segment is compared first by the numeric value
+/// with leading zeros stripped, then by the raw segment length to break ties,
+/// giving `0 < 00 < 1 < 01 < 001 < 2 < 02 < 10`.
+///
 /// # Total ordering
 ///
 /// Build metadata is ignored in evaluating `VersionReq`; it plays no role in
@@ -419,6 +454,11 @@ impl Version {
     ///   and `.` (dot).
     ///
     /// - `23456789999999999999.0.0` &mdash; overflow of a u64.
+    ///
+    /// For every successfully parsed version, `version.to_string()` parses
+    /// again to an equal `Version`; the only spelling preserved verbatim is
+    /// the text of legal pre-release and build identifiers (including leading
+    /// zeros inside build metadata).
     pub fn parse(text: &str) -> Result<Self, Error> {
         Version::from_str(text)
     }

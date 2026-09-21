@@ -49,6 +49,11 @@ pub(super) fn build_metadata(text: &str) -> BuildMetadata {
 }
 
 #[track_caller]
+pub(super) fn build_metadata_err(text: &str) -> Error {
+    BuildMetadata::new(text).unwrap_err()
+}
+
+#[track_caller]
 pub(super) fn assert_to_string(value: impl Display, expected: &str) {
     assert_eq!(value.to_string(), expected);
 }

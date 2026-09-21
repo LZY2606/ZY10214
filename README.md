@@ -66,6 +66,19 @@ Dependencies]* chapter of the Cargo reference.
 
 <br>
 
+## Normalization boundaries
+
+String round-tripping, structural equality, and requirement matching are three
+different contracts. For a table-driven description of which spellings
+`Display` canonicalizes, which fields `Eq`/`Ord`/`Hash` consider, and how
+Cargo's pre-release rule affects `matches`, see [NORMALIZATION.md]. It is
+backed by the executable corpus in `tests/test_normalization.rs` and
+`tests/test_serde_normalization.rs`.
+
+[NORMALIZATION.md]: NORMALIZATION.md
+
+<br>
+
 #### License
 
 <sup>

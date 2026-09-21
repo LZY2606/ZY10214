@@ -1,3 +1,12 @@
+//! `Version`, `VersionReq`, and `Comparator` serialize as the string produced
+//! by their `Display` impl and deserialize through the same parser used by
+//! `FromStr`. Therefore the accepted input set is identical whether a value is
+//! parsed directly or deserialized: a serialized requirement uses the
+//! canonicalized display spelling (for example `1.0.0` serializes as `^1.0.0`,
+//! and a comparator's build metadata never appears), and invalid strings
+//! produce the parse error unchanged. `Prerelease` and `BuildMetadata` have no
+//! standalone serde representation.
+
 use crate::{Comparator, Version, VersionReq};
 use core::fmt;
 use serde::de::{Deserialize, Deserializer, Error, Visitor};
